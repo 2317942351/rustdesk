@@ -18,6 +18,7 @@ env:
   CARGO_NDK_VERSION: '3.1.2'
   ANDROID_FLUTTER_VERSION: '3.24.5'
   VCPKG_COMMIT_ID: '120deac3062162151622ca4860575a33844ba10b'
+  VERSION: '1.4.6-tokenless'
   NDK_VERSION: 'r28c'
   VCPKG_BINARY_SOURCES: 'clear;x-gha,readwrite'
 
@@ -75,12 +76,6 @@ jobs:
           grep -n "let token = String::new();" src/ui_session_interface.rs
           grep -n "let token = String::new();" src/main.rs
           grep -n "let token = String::new();" src/client.rs
-
-      - name: Set tokenless artifact version
-        run: |
-          base_version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)"
-          test -n "$base_version"
-          echo "VERSION=${base_version}-tokenless" >> "$GITHUB_ENV"
 
       - name: Install flutter
         uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
