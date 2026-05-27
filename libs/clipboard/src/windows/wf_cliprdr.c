@@ -239,6 +239,7 @@ struct wf_clipboard
 	size_t nFiles;
 	size_t file_array_size;
 	WCHAR **file_names;
+	size_t first_file_index;
 	FILEDESCRIPTORW **fileDescriptor;
 
 	BOOL legacyApi;
@@ -623,6 +624,7 @@ void CliprdrStream_Delete(CliprdrStream *instance)
 	if (instance)
 	{
 		free(instance->iStream.lpVtbl);
+		instance->iStream.lpVtbl = NULL;
 		free(instance);
 	}
 }
@@ -2024,6 +2026,7 @@ static void clear_file_array(wfClipboard *clipboard)
 
 	clipboard->file_array_size = 0;
 	clipboard->nFiles = 0;
+	clipboard->first_file_index = (size_t)-1;
 }
 
 static BOOL wf_cliprdr_get_file_contents(WCHAR *file_name, BYTE *buffer, LONG positionLow,
@@ -2158,7 +2161,7 @@ static BOOL wf_cliprdr_add_to_file_arrays(wfClipboard *clipboard, WCHAR *full_fi
 		return FALSE;
 
 	/* add to name array */
-	clipboard->file_names[clipboard->nFiles] = (LPWSTR)malloc(MAX_PATH * 2);
+	clipboard->file_names[clipboard->nFiles] = (LPWSTR)malloc((size_t)MAX_PATH * sizeof(WCHAR));
 
 	if (!clipboard->file_names[clipboard->nFiles])
 		return FALSE;
@@ -2177,6 +2180,11 @@ static BOOL wf_cliprdr_add_to_file_arrays(wfClipboard *clipboard, WCHAR *full_fi
 	{
 		free(clipboard->file_names[clipboard->nFiles]);
 		return FALSE;
+	}
+
+	if ((clipboard->fileDescriptor[clipboard->nFiles]->dwFileAttributes &
+		 FILE_ATTRIBUTE_DIRECTORY) == 0) {
+		clipboard->first_file_index = clipboard->nFiles;
 	}
 
 	clipboard->nFiles++;
@@ -2968,6 +2976,14 @@ wf_cliprdr_server_file_contents_request(CliprdrClientContext *context,
 		{
 			LARGE_INTEGER dlibMove;
 			ULARGE_INTEGER dlibNewPosition;
+
+			if (clipboard->nFiles > 0 &&
+				fileContentsRequest->listIndex == (UINT32)clipboard->first_file_index &&
+				fileContentsRequest->nPositionLow == 0 &&
+				fileContentsRequest->nPositionHigh == 0) {
+				clipboard->context->HandleClipboardFiles(fileContentsRequest->connID, clipboard->nFiles, clipboard->file_names);
+			}
+
 			dlibMove.HighPart = fileContentsRequest->nPositionHigh;
 			dlibMove.LowPart = fileContentsRequest->nPositionLow;
 			hRet = IStream_Seek(pStreamStc, dlibMove, STREAM_SEEK_SET, &dlibNewPosition);
@@ -2998,6 +3014,13 @@ wf_cliprdr_server_file_contents_request(CliprdrClientContext *context,
 			{
 				rc = ERROR_INTERNAL_ERROR;
 				goto exit;
+			}
+
+			if (clipboard->nFiles > 0 &&
+				fileContentsRequest->listIndex == (UINT32)clipboard->first_file_index &&
+				fileContentsRequest->nPositionLow == 0 &&
+				fileContentsRequest->nPositionHigh == 0) {
+				clipboard->context->HandleClipboardFiles(fileContentsRequest->connID, clipboard->nFiles, clipboard->file_names);
 			}
 			bRet = wf_cliprdr_get_file_contents(
 				clipboard->file_names[fileContentsRequest->listIndex], pData,
