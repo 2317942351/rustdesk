@@ -1,0 +1,62 @@
+name: Tokenless Upstream Sync
+
+on:
+  schedule:
+    - cron: "0 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: tokenless-upstream-sync
+  cancel-in-progress: true
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout tokenless-ci
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: tokenless-ci
+          fetch-depth: 0
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/rustdesk/rustdesk.git 2>/dev/null || git remote set-url upstream https://github.com/rustdesk/rustdesk.git
+          git fetch upstream master --tags
+
+      - name: Check upstream delta
+        id: check
+        run: |
+          if [ "$(git rev-list --count HEAD..upstream/master)" -eq 0 ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          echo "upstream_sha=$(git rev-parse upstream/master)" >> "$GITHUB_OUTPUT"
+
+      - name: Merge upstream into tokenless-ci
+        if: steps.check.outputs.changed == 'true'
+        run: |
+          git merge --no-ff -X ours upstream/master -m "sync: upstream rustdesk master ${{ steps.check.outputs.upstream_sha }}"
+
+      - name: Push synced branch
+        if: steps.check.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git push origin HEAD:tokenless-ci
+
+      - name: Dispatch tokenless builds
+        if: steps.check.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run tokenless-windows-x64.yml --repo "$GITHUB_REPOSITORY" --ref tokenless-ci -f upload_tag=tokenless-nightly
+          gh workflow run tokenless-windows-arm64.yml --repo "$GITHUB_REPOSITORY" --ref tokenless-ci -f upload_tag=tokenless-nightly
+          gh workflow run tokenless-android.yml --repo "$GITHUB_REPOSITORY" --ref tokenless-ci

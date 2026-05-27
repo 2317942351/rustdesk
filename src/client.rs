@@ -181,14 +181,17 @@ impl Client {
     pub async fn start(
         peer: &str,
         key: &str,
-        token: &str,
+        _token: &str,
         conn_type: ConnType,
         interface: impl Interface,
     ) -> ResultType<((Stream, bool, Option<Vec<u8>>), (i32, String))> {
         debug_assert!(peer == interface.get_id());
         interface.update_direct(None);
         interface.update_received(false);
-        match Self::_start(peer, key, token, conn_type, interface).await {
+        // Keep API/account login available, but do not forward the access token
+        // into hbbs/hbbr connection setup.
+        let token = String::new();
+        match Self::_start(peer, key, &token, conn_type, interface).await {
             Err(err) => {
                 let err_str = err.to_string();
                 if err_str.starts_with("Failed") {

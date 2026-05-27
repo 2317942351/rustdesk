@@ -4,10 +4,6 @@ on:
   workflow_dispatch:
   push:
     branches: [tokenless-ci]
-    paths:
-      - src/ui_session_interface.rs
-      - src/main.rs
-      - .github/workflows/tokenless-android.yml
 
 permissions:
   contents: write
@@ -22,7 +18,6 @@ env:
   CARGO_NDK_VERSION: '3.1.2'
   ANDROID_FLUTTER_VERSION: '3.24.5'
   VCPKG_COMMIT_ID: '120deac3062162151622ca4860575a33844ba10b'
-  VERSION: '1.4.6-tokenless'
   NDK_VERSION: 'r28c'
   VCPKG_BINARY_SOURCES: 'clear;x-gha,readwrite'
 
@@ -79,6 +74,13 @@ jobs:
         run: |
           grep -n "let token = String::new();" src/ui_session_interface.rs
           grep -n "let token = String::new();" src/main.rs
+          grep -n "let token = String::new();" src/client.rs
+
+      - name: Set tokenless artifact version
+        run: |
+          base_version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)"
+          test -n "$base_version"
+          echo "VERSION=${base_version}-tokenless" >> "$GITHUB_ENV"
 
       - name: Install flutter
         uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
@@ -191,7 +193,7 @@ jobs:
               --repo "${GITHUB_REPOSITORY}" \
               --target "${GITHUB_SHA}" \
               --title "RustDesk Tokenless Nightly" \
-              --notes "Automated tokenless compatibility builds from tokenless-ci. Source commit: ${GITHUB_SHA}" \
+              --notes "Automated tokenless compatibility builds from tokenless-ci. Source commit: ${GITHUB_SHA}. Trigger: upstream sync or manual push." \
             || gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null
           fi
           gh release upload "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" apk/*.apk --clobber

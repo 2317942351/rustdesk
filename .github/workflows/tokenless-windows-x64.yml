@@ -9,10 +9,6 @@ on:
         default: tokenless-nightly
   push:
     branches: [tokenless-ci]
-    paths:
-      - src/ui_session_interface.rs
-      - src/main.rs
-      - .github/workflows/tokenless-windows-x64.yml
 
 permissions:
   contents: write
@@ -27,7 +23,6 @@ env:
   LLVM_VERSION: '15.0.6'
   FLUTTER_VERSION: '3.24.5'
   VCPKG_COMMIT_ID: '120deac3062162151622ca4860575a33844ba10b'
-  VERSION: '1.4.6-tokenless'
   VCPKG_BINARY_SOURCES: 'clear;x-gha,readwrite'
 
 jobs:
@@ -65,6 +60,14 @@ jobs:
         run: |
           grep -n "let token = String::new();" src/ui_session_interface.rs
           grep -n "let token = String::new();" src/main.rs
+          grep -n "let token = String::new();" src/client.rs
+
+      - name: Set tokenless artifact version
+        shell: bash
+        run: |
+          base_version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)"
+          test -n "$base_version"
+          echo "VERSION=${base_version}-tokenless" >> "$GITHUB_ENV"
 
       - name: Restore bridge files
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
@@ -195,7 +198,7 @@ jobs:
             $PSNativeCommandUseErrorActionPreference = $false
           }
           $releaseTitle = "RustDesk Tokenless Nightly"
-          $releaseNotes = "Automated tokenless compatibility builds from tokenless-ci. Source commit: $env:GITHUB_SHA"
+          $releaseNotes = "Automated tokenless compatibility builds from tokenless-ci. Source commit: $env:GITHUB_SHA. Trigger: upstream sync or manual push."
           gh release view $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY *> $null
           if ($LASTEXITCODE -ne 0) {
             gh release create $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title $releaseTitle --notes $releaseNotes
