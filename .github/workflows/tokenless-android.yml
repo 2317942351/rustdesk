@@ -36,7 +36,6 @@ jobs:
         job:
           - { arch: aarch64, target: aarch64-linux-android, android_target: arm64-v8a, flutter_target: android-arm64, apk_name: app-arm64-v8a-release.apk, ndk_lib: aarch64-linux-android }
           - { arch: armv7, target: armv7-linux-androideabi, android_target: armeabi-v7a, flutter_target: android-arm, apk_name: app-armeabi-v7a-release.apk, ndk_lib: arm-linux-androideabi }
-          - { arch: x86_64, target: x86_64-linux-android, android_target: x86_64, flutter_target: android-x64, apk_name: app-x86_64-release.apk, ndk_lib: x86_64-linux-android }
     steps:
       - name: Free Disk Space
         uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be
@@ -136,7 +135,6 @@ jobs:
           case ${{ matrix.job.target }} in
             aarch64-linux-android) ./flutter/ndk_arm64.sh ;;
             armv7-linux-androideabi) ./flutter/ndk_arm.sh ;;
-            x86_64-linux-android) ./flutter/ndk_x64.sh ;;
           esac
           mkdir -p ./flutter/android/app/src/main/jniLibs/${{ matrix.job.android_target }}
           cp ./target/${{ matrix.job.target }}/release/liblibrustdesk.so ./flutter/android/app/src/main/jniLibs/${{ matrix.job.android_target }}/librustdesk.so
