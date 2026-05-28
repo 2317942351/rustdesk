@@ -210,7 +210,7 @@ impl Client {
         // Keep API/account login available, but do not forward the access token
         // into hbbs/hbbr connection setup.
         let token = String::new();
-        match Self::_start(peer, key, &token, conn_type, interface).await {
+        match Self::_start(peer, key, &token, conn_type, interface.clone()).await {
             Err(err) => {
                 let err_str = err.to_string();
                 if err_str.starts_with("Failed") {
