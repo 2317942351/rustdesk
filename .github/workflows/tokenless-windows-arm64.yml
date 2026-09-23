@@ -210,6 +210,113 @@ jobs:
           ) | Set-Content -LiteralPath .cargo\config.toml -Encoding UTF8
           Get-Content -LiteralPath .cargo\config.toml
 
+      - name: Locate Visual Studio ARM64 toolchain
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          # The GitHub-hosted `windows-11-arm` image moved from Visual Studio 2022 to
+          # Visual Studio 2026 (install root `Microsoft Visual Studio\18`) in September 2026,
+          # and the version segment of the install root is not stable across image updates.
+          # Resolve vcvarsall.bat at runtime instead of hardcoding
+          # `...\Microsoft Visual Studio\2022\Enterprise\...`, which no longer exists.
+          $vsRoots = @(
+            "$env:ProgramFiles\Microsoft Visual Studio",
+            "${env:ProgramFiles(x86)}\Microsoft Visual Studio"
+          )
+
+          $vswhere = @(
+            "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe",
+            "$env:ProgramFiles\Microsoft Visual Studio\Installer\vswhere.exe"
+          ) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+
+          $vcvars = $null
+          if ($vswhere) {
+            Write-Host "vswhere: $vswhere"
+            # Prefer an installation that actually ships the ARM64 build tools,
+            # then fall back to any installation.
+            foreach ($require in @('Microsoft.VisualStudio.Component.VC.Tools.ARM64', '')) {
+              $vswhereArgs = @('-latest', '-products', '*', '-find', 'VC\Auxiliary\Build\vcvarsall.bat')
+              if ($require) {
+                $vswhereArgs = @('-latest', '-products', '*', '-requires', $require, '-find', 'VC\Auxiliary\Build\vcvarsall.bat')
+              }
+              $hit = @(& $vswhere @vswhereArgs 2>$null) |
+                Where-Object { $_ -and (Test-Path -LiteralPath $_) } |
+                Select-Object -First 1
+              if ($hit) { $vcvars = $hit; break }
+            }
+          }
+
+          if (-not $vcvars) {
+            # Fallback: scan the known install roots for `<VSROOT>\<version>\<edition>`.
+            # The ARM64 compiler check below is the real discriminator, not the order.
+            $candidates = @()
+            foreach ($root in $vsRoots) {
+              if (-not (Test-Path -LiteralPath $root)) { continue }
+              $candidates += @(
+                Get-ChildItem -LiteralPath $root -Directory -ErrorAction SilentlyContinue |
+                  Sort-Object -Property Name -Descending |
+                  ForEach-Object {
+                    Get-ChildItem -LiteralPath $_.FullName -Directory -ErrorAction SilentlyContinue |
+                      ForEach-Object { Join-Path $_.FullName 'VC\Auxiliary\Build\vcvarsall.bat' }
+                  } |
+                  Where-Object { Test-Path -LiteralPath $_ }
+              )
+            }
+            Write-Host 'vcvarsall.bat candidates found by directory scan:'
+            $candidates | ForEach-Object { Write-Host "  $_" }
+
+            $suffix = 'VC\Auxiliary\Build\vcvarsall.bat'
+            foreach ($candidate in $candidates) {
+              if (-not $candidate.EndsWith($suffix, [StringComparison]::OrdinalIgnoreCase)) { continue }
+              $installRoot = $candidate.Substring(0, $candidate.Length - $suffix.Length).TrimEnd('\')
+              $msvcTools = Join-Path $installRoot 'VC\Tools\MSVC'
+              $arm64Compiler = @(
+                Get-ChildItem -LiteralPath $msvcTools -Directory -ErrorAction SilentlyContinue |
+                  ForEach-Object {
+                    @(
+                      (Join-Path $_.FullName 'bin\Hostarm64\arm64\cl.exe'),
+                      (Join-Path $_.FullName 'bin\Hostx64\arm64\cl.exe')
+                    ) | Where-Object { Test-Path -LiteralPath $_ }
+                  }
+              )
+              if ($arm64Compiler) { $vcvars = $candidate; break }
+            }
+            if (-not $vcvars) { $vcvars = $candidates | Select-Object -First 1 }
+          }
+
+          if (-not $vcvars) {
+            Write-Host '--- Visual Studio layout diagnostics ---'
+            if ($vswhere) { & $vswhere -latest -products '*' -format json 2>&1 | Write-Host }
+            foreach ($root in $vsRoots) {
+              Write-Host "Contents of ${root}:"
+              Get-ChildItem -LiteralPath $root -Recurse -Depth 2 -ErrorAction SilentlyContinue |
+                Select-Object -ExpandProperty FullName | Write-Host
+            }
+            throw 'No Visual Studio installation providing VC\Auxiliary\Build\vcvarsall.bat was found'
+          }
+
+          Write-Host "Resolved vcvarsall.bat: $vcvars"
+
+          # Fail fast with a readable message here rather than with an opaque exit code
+          # in the build step.
+          $probe = Join-Path $env:RUNNER_TEMP 'probe-vcvars-arm64.cmd'
+          @(
+            '@echo off',
+            "call `"$vcvars`" arm64",
+            'if errorlevel 1 exit /b 1',
+            'where cl'
+          ) | Set-Content -LiteralPath $probe -Encoding ascii
+          $probeOutput = & cmd.exe /d /c $probe 2>&1
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host $probeOutput
+            throw "vcvarsall.bat failed to initialise the ARM64 toolchain (exit $LASTEXITCODE)"
+          }
+          Write-Host 'ARM64 toolchain probe:'
+          $probeOutput | Write-Host
+
+          "VCVARS_PATH=$vcvars" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: Build complete Windows ARM64 package
         shell: cmd
         env:
@@ -220,7 +327,7 @@ jobs:
           SODIUM_LIB_DIR: C:\vcpkg\installed\arm64-windows-static\lib
           SODIUM_INCLUDE_DIR: C:\vcpkg\installed\arm64-windows-static\include
         run: |
-          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" arm64 || call "C:\Program Files\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvarsall.bat" arm64 || call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvarsall.bat" arm64
+          call "%VCVARS_PATH%" arm64
           if errorlevel 1 exit /b %errorlevel%
           set VCPKG_ROOT=C:\vcpkg
           set VCPKG_INSTALLED_ROOT=C:\vcpkg\installed
